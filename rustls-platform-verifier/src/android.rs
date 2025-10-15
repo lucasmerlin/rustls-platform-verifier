@@ -153,7 +153,7 @@ impl<'a> Context<'a> {
             self.loader,
             "loadClass",
             "(Ljava/lang/String;)Ljava/lang/Class;",
-            &[JValue::from(name)],
+            &[JValue::from(&name)],
         )?;
 
         Ok(JObject::try_from(class)?.into())
@@ -203,6 +203,6 @@ impl CachedClass {
             Ok(cx.env().new_global_ref(class)?)
         })?;
 
-        Ok(JClass::from(class.as_obj()))
+        Ok(JClass::from(class.as_obj().clone()))
     }
 }

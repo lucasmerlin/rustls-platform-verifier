@@ -120,7 +120,7 @@ impl Verifier {
                 for (idx, cert) in certificate_chain {
                     let idx = idx.try_into().unwrap();
                     let cert_buffer = env.byte_array_from_slice(cert)?;
-                    env.set_object_array_element(array, idx, cert_buffer)?
+                    env.set_object_array_element(&array, idx, cert_buffer)?
                 }
 
                 array
@@ -129,14 +129,14 @@ impl Verifier {
             let allowed_ekus = {
                 let array = env.new_object_array(
                     ALLOWED_EKUS.len().try_into().unwrap(),
-                    STRING_CLASS.get(cx)?,
+                    STRING_CLASS.get(&mut cx)?,
                     JObject::null(),
                 )?;
 
                 for (idx, eku) in ALLOWED_EKUS.iter().enumerate() {
                     let idx = idx.try_into().unwrap();
                     let eku = env.new_string(eku)?;
-                    env.set_object_array_element(array, idx, eku)?;
+                    env.set_object_array_element(&array, idx, eku)?;
                 }
 
                 array
@@ -176,19 +176,21 @@ impl Verifier {
                 "Lorg/rustls/platformverifier/VerificationResult;"
             );
 
+            let a = env.new_string(&server_name.to_str())?;
+            let b = env.new_string(AUTH_TYPE)?;
             let result = env
                 .call_static_method(
                     CERT_VERIFIER_CLASS.get(cx)?,
                     "verifyCertificateChain",
                     VERIFIER_CALL,
                     &[
-                        JValue::from(*cx.application_context()),
-                        JValue::from(env.new_string(&server_name.to_str())?),
-                        JValue::from(env.new_string(AUTH_TYPE)?),
-                        JValue::from(JObject::from(allowed_ekus)),
-                        JValue::from(ocsp_response),
+                        JValue::from(&*cx.application_context()),
+                        JValue::from(&a),
+                        JValue::from(&b),
+                        JValue::from(&JObject::from(allowed_ekus)),
+                        JValue::from(&ocsp_response),
                         JValue::Long(now),
-                        JValue::from(JObject::from(cert_list)),
+                        JValue::from(&JObject::from(cert_list)),
                     ],
                 )?
                 .l()?;
@@ -260,7 +262,7 @@ fn extract_result_info(env: &mut JNIEnv<'_>, result: JObject<'_>) -> (VerifierSt
         .get_field(result, "message", "Ljava/lang/String;")
         .and_then(|m| m.l())
         .map(|o| (!o.is_null()).then_some(o))
-        .and_then(|s| s.map(|s| JavaStr::from_env(env, s.into())).transpose())
+        .and_then(|s| s.map(|s| JavaStr::from_env(env, (&s).into())).transpose())
         .unwrap();
 
     (status, msg.map(String::from))
