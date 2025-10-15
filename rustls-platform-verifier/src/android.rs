@@ -74,13 +74,13 @@ fn global() -> &'static Global {
 /// nothing else in your application needs access the Android runtime.
 ///
 /// Initialization must be done before any verification is attempted.
-pub fn init_hosted(env: &JNIEnv, context: JObject) -> Result<(), JNIError> {
+pub fn init_hosted(env: &mut JNIEnv, context: JObject) -> Result<(), JNIError> {
     GLOBAL.get_or_try_init(|| -> Result<_, JNIError> {
         let loader =
-            env.call_method(context, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?;
+            env.call_method(&context, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?;
         let global = Global::Internal {
             java_vm: env.get_java_vm()?,
-            context: env.new_global_ref(context)?,
+            context: env.new_global_ref(&context)?,
             loader: env.new_global_ref(JObject::try_from(loader)?)?,
         };
 
@@ -132,8 +132,8 @@ pub(super) struct Context<'a> {
 
 impl<'a> Context<'a> {
     /// Borrow a reference to the JNI Environment executing the Android application
-    pub(super) fn env(&self) -> &JNIEnv<'a> {
-        &self.env
+    pub(super) fn env(&mut self) -> &mut JNIEnv<'a> {
+        &mut self.env
     }
 
     /// Borrow the `applicationContext` from the Android application
@@ -146,7 +146,7 @@ impl<'a> Context<'a> {
     ///
     /// This should be used instead of `JNIEnv::find_class` to ensure all classes
     /// in the application can be found.
-    pub(super) fn load_class(&self, name: &str) -> Result<JClass<'a>, Error> {
+    pub(super) fn load_class(&mut self, name: &str) -> Result<JClass<'a>, Error> {
         let env = self.env();
         let name = env.new_string(name)?;
         let class = env.call_method(
@@ -165,17 +165,17 @@ impl<'a> Context<'a> {
 /// are cleared.
 pub(super) fn with_context<F, T>(f: F) -> Result<T, Error>
 where
-    F: FnOnce(&Context) -> Result<T, Error>,
+    F: FnOnce(&mut Context) -> Result<T, Error>,
 {
-    let context = global().context()?;
+    let mut context = global().context()?;
     let env = context.env();
 
     // 16 is the default capacity in the JVM, we can make this configurable if necessary
     env.push_local_frame(16)?;
 
-    let res = f(&context);
+    let res = f(&mut context);
 
-    env.pop_local_frame(JObject::null())?;
+    unsafe { env.pop_local_frame(&JObject::null())?; }
 
     res
 }
@@ -196,7 +196,7 @@ impl CachedClass {
     }
 
     /// Gets the cached class reference, loaded on first use
-    pub(super) fn get<'a: 'b, 'b>(&'a self, cx: &Context<'b>) -> Result<JClass<'b>, Error> {
+    pub(super) fn get<'a: 'b, 'b>(&'a self, cx: &mut Context<'b>) -> Result<JClass<'b>, Error> {
         let class = self.class.get_or_try_init(|| -> Result<_, Error> {
             let class = cx.load_class(self.name)?;
 

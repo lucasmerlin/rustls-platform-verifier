@@ -238,9 +238,9 @@ impl Verifier {
     }
 }
 
-fn extract_result_info(env: &JNIEnv<'_>, result: JObject<'_>) -> (VerifierStatus, Option<String>) {
+fn extract_result_info(env: &mut JNIEnv<'_>, result: JObject<'_>) -> (VerifierStatus, Option<String>) {
     let status_code = env
-        .get_field(result, "code", "I")
+        .get_field(&result, "code", "I")
         .and_then(|code| code.i())
         .unwrap();
 
