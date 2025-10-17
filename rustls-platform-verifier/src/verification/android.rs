@@ -1,6 +1,5 @@
 use jni::{
     objects::{JObject, JValue},
-    strings::JavaStr,
     JNIEnv,
 };
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerifier};
@@ -107,13 +106,20 @@ impl Verifier {
             .map_err(|_| TlsError::FailedToGetCurrentTime)?;
 
         let verification_result = with_context(|cx| {
+            // Get class references first before borrowing env
+            let byte_array_class = BYTE_ARRAY_CLASS.get(cx)?;
+            let string_class = STRING_CLASS.get(cx)?;
+            let cert_verifier_class = CERT_VERIFIER_CLASS.get(cx)?;
+            let app_context = unsafe { JObject::from_raw(cx.application_context().as_raw()) };
+
             let env = cx.env();
+
             // We don't provide an initial element so that the array filling can be cleaner.
             // It's valid to provide a `null` value. Ref: https://docs.oracle.com/en/java/javase/13/docs/specs/jni/functions.html -> NewObjectArray
             let cert_list = {
                 let array = env.new_object_array(
                     (intermediates.len() + 1).try_into().unwrap(),
-                    BYTE_ARRAY_CLASS.get(cx)?,
+                    byte_array_class,
                     JObject::null(),
                 )?;
 
@@ -129,7 +135,7 @@ impl Verifier {
             let allowed_ekus = {
                 let array = env.new_object_array(
                     ALLOWED_EKUS.len().try_into().unwrap(),
-                    STRING_CLASS.get(&mut cx)?,
+                    string_class,
                     JObject::null(),
                 )?;
 
@@ -142,18 +148,20 @@ impl Verifier {
                 array
             };
 
-            let ocsp_response = ocsp_response
-                .map(|b| env.byte_array_from_slice(b))
-                .transpose()?
-                .map(JObject::from)
-                .unwrap_or_else(JObject::null);
+            let ocsp_response_obj = match ocsp_response {
+                Some(data) => {
+                    let byte_array = env.byte_array_from_slice(data)?;
+                    JObject::from(byte_array)
+                }
+                None => JObject::null(),
+            };
 
             #[cfg(any(test, feature = "ffi-testing"))]
             {
                 if let Some(mock_root) = &self.test_only_root_ca_override {
                     let mock_root = env.byte_array_from_slice(mock_root)?;
                     env.call_static_method(
-                        CERT_VERIFIER_CLASS.get(cx)?,
+                        cert_verifier_class,
                         "addMockRoot",
                         "([B)V",
                         &[JValue::from(mock_root)],
@@ -180,15 +188,15 @@ impl Verifier {
             let b = env.new_string(AUTH_TYPE)?;
             let result = env
                 .call_static_method(
-                    CERT_VERIFIER_CLASS.get(cx)?,
+                    cert_verifier_class,
                     "verifyCertificateChain",
                     VERIFIER_CALL,
                     &[
-                        JValue::from(&*cx.application_context()),
+                        JValue::from(&app_context),
                         JValue::from(&a),
                         JValue::from(&b),
                         JValue::from(&JObject::from(allowed_ekus)),
-                        JValue::from(&ocsp_response),
+                        JValue::from(&ocsp_response_obj),
                         JValue::Long(now),
                         JValue::from(&JObject::from(cert_list)),
                     ],
@@ -262,10 +270,10 @@ fn extract_result_info(env: &mut JNIEnv<'_>, result: JObject<'_>) -> (VerifierSt
         .get_field(result, "message", "Ljava/lang/String;")
         .and_then(|m| m.l())
         .map(|o| (!o.is_null()).then_some(o))
-        .and_then(|s| s.map(|s| JavaStr::from_env(env, (&s).into())).transpose())
+        .and_then(|s| s.map(|s| env.get_string(&s.into()).map(|jstr| jstr.to_string_lossy().into_owned())).transpose())
         .unwrap();
 
-    (status, msg.map(String::from))
+    (status, msg)
 }
 
 impl ServerCertVerifier for Verifier {

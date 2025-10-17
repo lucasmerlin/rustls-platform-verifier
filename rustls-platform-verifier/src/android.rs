@@ -56,8 +56,8 @@ impl Global {
 
         Ok(Context {
             env,
-            context: JObject::from(context),
-            loader: JObject::from(loader),
+            context: unsafe { JObject::from_raw(context.as_obj().as_raw()) },
+            loader: unsafe { JObject::from_raw(loader.as_obj().as_raw()) },
         })
     }
 }
@@ -147,13 +147,13 @@ impl<'a> Context<'a> {
     /// This should be used instead of `JNIEnv::find_class` to ensure all classes
     /// in the application can be found.
     pub(super) fn load_class(&mut self, name: &str) -> Result<JClass<'a>, Error> {
-        let env = self.env();
-        let name = env.new_string(name)?;
-        let class = env.call_method(
-            self.loader,
+        let name_str = self.env().new_string(name)?;
+        let loader = unsafe { JObject::from_raw(self.loader.as_raw()) };
+        let class = self.env().call_method(
+            &loader,
             "loadClass",
             "(Ljava/lang/String;)Ljava/lang/Class;",
-            &[JValue::from(&name)],
+            &[JValue::from(&name_str)],
         )?;
 
         Ok(JObject::try_from(class)?.into())
@@ -168,14 +168,13 @@ where
     F: FnOnce(&mut Context) -> Result<T, Error>,
 {
     let mut context = global().context()?;
-    let env = context.env();
 
     // 16 is the default capacity in the JVM, we can make this configurable if necessary
-    env.push_local_frame(16)?;
+    context.env().push_local_frame(16)?;
 
     let res = f(&mut context);
 
-    unsafe { env.pop_local_frame(&JObject::null())?; }
+    unsafe { context.env().pop_local_frame(&JObject::null())?; }
 
     res
 }
@@ -203,6 +202,6 @@ impl CachedClass {
             Ok(cx.env().new_global_ref(class)?)
         })?;
 
-        Ok(JClass::from(class.as_obj().clone()))
+        Ok(unsafe { JClass::from_raw(class.as_obj().as_raw()) })
     }
 }
