@@ -24,7 +24,8 @@ static def getOsArch() {
 }
 
 android {
-    compileSdk 33
+    compileSdk 35
+    buildToolsVersion "35.0.0"
 
     defaultConfig {
         minSdk 22
